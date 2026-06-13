@@ -37,12 +37,12 @@ from counterfactual_utils import (
 # ============================================================
 
 st.set_page_config(
-    page_title="Poor Bowel Preparation Risk Prediction",
+    page_title="ChangHai Bowel Preparation Risk Prediction",
     page_icon="🩺",
     layout="wide"
 )
 
-st.title("🩺 Poor Bowel Preparation Risk Prediction Tool")
+st.title("🩺 ChangHai Bowel Preparation Risk Prediction Tool")
 st.caption(
     "Final model: Raw Stacking Classifier. "
     "This tool estimates the risk of poor bowel preparation and provides model-based explanations."
