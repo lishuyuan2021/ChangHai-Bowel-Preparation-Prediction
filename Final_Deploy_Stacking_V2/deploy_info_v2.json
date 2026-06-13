@@ -1,0 +1,119 @@
+{
+    "model_version": "V2_Raw_Stacking",
+    "created_time": "2026-06-02 17:26:16",
+    "final_model_name": "Stacking Classifier",
+    "final_calibration_method": "Raw",
+    "target_name": "outcome",
+    "positive_class": 1,
+    "positive_class_meaning": "Poor bowel preparation",
+    "feature_order": [
+        "Age",
+        "BMI",
+        "DietaryRestrictionDays",
+        "Sex",
+        "InpatientStatus",
+        "PreviousColonoscopy",
+        "ChronicConstipation",
+        "DiabetesMellitus",
+        "StoolForm",
+        "BPEducationModality",
+        "SplitDose_BP",
+        "PreColonoscopyPhysicalActivity",
+        "DietaryRestriction_1",
+        "DietaryRestriction_2",
+        "DietaryRestriction_3",
+        "DietaryRestriction_4",
+        "LaxativeRegimen_1",
+        "LaxativeRegimen_2",
+        "LaxativeRegimen_3",
+        "LaxativeRegimen_4",
+        "LaxativeRegimen_5",
+        "LaxativeRegimen_6",
+        "PreviousAbdominopelvicSurgery_1",
+        "BPtoColonoscopyinterval_1",
+        "BPtoColonoscopyinterval_2",
+        "BPtoColonoscopyinterval_3",
+        "BPtoColonoscopyinterval_4"
+    ],
+    "n_features": 27,
+    "continuous_features": [
+        "BMI",
+        "Age",
+        "DietaryRestrictionDays"
+    ],
+    "categorical_features": [
+        "Sex",
+        "InpatientStatus",
+        "PreviousColonoscopy",
+        "ChronicConstipation",
+        "DiabetesMellitus",
+        "StoolForm",
+        "BPEducationModality",
+        "SplitDose_BP",
+        "PreColonoscopyPhysicalActivity",
+        "DietaryRestriction_1",
+        "DietaryRestriction_2",
+        "DietaryRestriction_3",
+        "DietaryRestriction_4",
+        "LaxativeRegimen_1",
+        "LaxativeRegimen_2",
+        "LaxativeRegimen_3",
+        "LaxativeRegimen_4",
+        "LaxativeRegimen_5",
+        "LaxativeRegimen_6",
+        "PreviousAbdominopelvicSurgery_1",
+        "BPtoColonoscopyinterval_1",
+        "BPtoColonoscopyinterval_2",
+        "BPtoColonoscopyinterval_3",
+        "BPtoColonoscopyinterval_4"
+    ],
+    "risk_cutoffs": {
+        "low_risk_cutoff": 0.105,
+        "intervention_cutoff": 0.135,
+        "youden_cutoff": 0.16,
+        "high_risk_cutoff": 0.275
+    },
+    "risk_stratification": {
+        "Low Risk": "< 0.105",
+        "Intermediate Risk": "0.105 - 0.275",
+        "High Risk": ">= 0.275",
+        "Candidate intervention threshold": ">= 0.135"
+    },
+    "train_shape": [
+        7869,
+        27
+    ],
+    "test_shape": [
+        1968,
+        27
+    ],
+    "val_shape": [
+        1487,
+        27
+    ],
+    "train_prevalence": 0.11691447452026942,
+    "test_prevalence": 0.11686991869918699,
+    "val_prevalence": 0.11768661735036987,
+    "onehot_groups": [
+        [
+            "DietaryRestriction_1",
+            "DietaryRestriction_2",
+            "DietaryRestriction_3",
+            "DietaryRestriction_4"
+        ],
+        [
+            "LaxativeRegimen_1",
+            "LaxativeRegimen_2",
+            "LaxativeRegimen_3",
+            "LaxativeRegimen_4",
+            "LaxativeRegimen_5",
+            "LaxativeRegimen_6"
+        ],
+        [
+            "BPtoColonoscopyinterval_1",
+            "BPtoColonoscopyinterval_2",
+            "BPtoColonoscopyinterval_3",
+            "BPtoColonoscopyinterval_4"
+        ]
+    ]
+}
