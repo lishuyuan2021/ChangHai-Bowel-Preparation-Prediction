@@ -3,37 +3,88 @@
 # ============================================================
 
 from pathlib import Path
-import os
 import cloudpickle
 import joblib
 import numpy as np
 import pandas as pd
 import streamlit as st
+import matplotlib.pyplot as plt
+import matplotlib.font_manager as fm
 
+def setup_chinese_font():
+    """
+    设置 matplotlib 中文字体。
+    Streamlit Cloud 可配合 packages.txt 安装 fonts-noto-cjk。
+    """
+    candidate_fonts = [
+        "Noto Sans CJK SC",
+        "Noto Sans CJK JP",
+        "Noto Sans CJK TC",
+        "Microsoft YaHei",
+        "SimHei",
+        "Arial Unicode MS",
+        "WenQuanYi Zen Hei",
+        "DejaVu Sans"
+    ]
 
+    available_fonts = {f.name for f in fm.fontManager.ttflist}
+
+    for font in candidate_fonts:
+        if font in available_fonts:
+            plt.rcParams["font.sans-serif"] = [font]
+            break
+
+    plt.rcParams["axes.unicode_minus"] = False
+    plt.rcParams["font.family"] = "sans-serif"
 # ============================================================
 # Load deployment package
 # ============================================================
 
-@st.cache_resource
+@st.cache_resource(show_spinner=False)
 def load_deploy_pack(deploy_dir: str):
+    """
+    读取模型部署包。
+    兼容两种结构：
+    1. Final_Deploy_Stacking_V2/Final_Raw_Stacking_Deploy_Pack_V2_cloudpickle.pkl
+    2. 仓库根目录/Final_Raw_Stacking_Deploy_Pack_V2_cloudpickle.pkl
+    """
     deploy_dir = Path(deploy_dir)
 
-    pack_path = deploy_dir / "Final_Raw_Stacking_Deploy_Pack_V2_cloudpickle.pkl"
+    candidate_pack_paths = [
+        deploy_dir / "Final_Raw_Stacking_Deploy_Pack_V2_cloudpickle.pkl",
+        Path("Final_Raw_Stacking_Deploy_Pack_V2_cloudpickle.pkl"),
+        Path("Final_Deploy_Stacking_V2") / "Final_Raw_Stacking_Deploy_Pack_V2_cloudpickle.pkl",
+    ]
 
-    if not pack_path.exists():
-        raise FileNotFoundError(f"Deployment package not found: {pack_path}")
+    pack_path = None
+
+    for path in candidate_pack_paths:
+        if path.exists():
+            pack_path = path
+            break
+
+    if pack_path is None:
+        raise FileNotFoundError(
+            "未找到 Final_Raw_Stacking_Deploy_Pack_V2_cloudpickle.pkl。"
+            "请确认模型部署包位于 Final_Deploy_Stacking_V2 文件夹或仓库根目录。"
+        )
 
     with open(pack_path, "rb") as f:
         deploy_pack = cloudpickle.load(f)
 
     if deploy_pack.get("scaler", None) is None:
-        scaler_path = deploy_dir / "standard_scaler_v2.pkl"
-        if scaler_path.exists():
-            deploy_pack["scaler"] = joblib.load(scaler_path)
+        candidate_scaler_paths = [
+            deploy_dir / "standard_scaler_v2.pkl",
+            Path("standard_scaler_v2.pkl"),
+            Path("Final_Deploy_Stacking_V2") / "standard_scaler_v2.pkl",
+        ]
+
+        for scaler_path in candidate_scaler_paths:
+            if scaler_path.exists():
+                deploy_pack["scaler"] = joblib.load(scaler_path)
+                break
 
     return deploy_pack
-
 
 # ============================================================
 # Display names
