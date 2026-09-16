@@ -270,9 +270,9 @@ if "predicted_prob" in st.session_state:
 
         top_display_cols = [
             "Intervention Type",
-            "Intervention",
-            "Original_Risk",
-            "Counterfactual_Risk"
+            "Counterfactual Recommendation",
+            "Original Risk",
+            "Post-Intervention Risk"
         ]
         st.dataframe(
             cf_all_display[top_display_cols].head(20),
@@ -284,7 +284,7 @@ if "predicted_prob" in st.session_state:
             "Counterfactual Recommendation",
             "Baseline Measure",
             "Post-Intervention Measure",
-            "Baseline Risk",
+            "Original Risk",
             "Post-Intervention Risk"
         ]
 
