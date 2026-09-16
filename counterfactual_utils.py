@@ -384,7 +384,7 @@ def evaluate_single_interventions(
 
     if not df.empty:
         df = df.sort_values(
-            by="Absolute_Risk_Reduction",
+            by="Absolute Risk Reduction",
             ascending=False
         ).reset_index(drop=True)
 
@@ -462,7 +462,7 @@ def evaluate_pairwise_interventions(
 
     if not df.empty:
         df = df.sort_values(
-            by="Absolute_Risk_Reduction",
+            by="Absolute Risk Reduction",
             ascending=False
         ).reset_index(drop=True)
 
