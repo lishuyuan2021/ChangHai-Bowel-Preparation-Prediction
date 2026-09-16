@@ -154,7 +154,7 @@ def build_patient_input_form(feature_order, scaler, feature_name_map):
     row = {col: 0 for col in feature_order}
     raw_values = {}
     summary_rows = []
-
+    used_features = set()
     dietary_group = [c for c in [
         "DietaryRestriction_1",
         "DietaryRestriction_2",
@@ -186,43 +186,32 @@ def build_patient_input_form(feature_order, scaler, feature_name_map):
         age = st.number_input("Age, years", min_value=18.0, max_value=100.0, value=60.0, step=1.0)
 
     with c2:
-        bmi = st.number_input("BMI, kg/m²", min_value=10.0, max_value=50.0, value=23.0, step=0.1)
+        sex_options = {"Male": 1, "Female": 0}
+        selected_sex = st.selectbox("Sex", list(sex_options.keys()))
 
     with c3:
-        diet_days = st.number_input("Dietary restriction duration, days", min_value=0.0, max_value=7.0, value=1.0, step=1.0)
+        bmi = st.number_input("BMI(kg/m²)", min_value=10.0, max_value=50.0, value=23.0, step=0.1)
 
     if "Age" in row:
         row["Age"] = standardize_value(scaler, "Age", age)
+        used_features.add("Age")
+    if "Sex" in row:
+        row["Sex"] = sex_options[selected_sex]
+        used_features.add("Sex")
     if "BMI" in row:
         row["BMI"] = standardize_value(scaler, "BMI", bmi)
-    if "DietaryRestrictionDays" in row:
-        row["DietaryRestrictionDays"] = standardize_value(scaler, "DietaryRestrictionDays", diet_days)
+        used_features.add("BMI")
 
-    raw_values.update({
-        "Age": age,
-        "BMI": bmi,
-        "DietaryRestrictionDays": diet_days
-    })
-
+    raw_values.update({"Age": age, "Sex": sex_options[selected_sex], "BMI": bmi})
     summary_rows.extend([
         {"Variable": "Age", "Value": age},
         {"Variable": "BMI", "Value": bmi},
-        {"Variable": "Dietary restriction duration", "Value": f"{diet_days} days"},
+        {"Variable": "Sex", "Value": selected_sex},
     ])
 
     st.subheader("Clinical factors")
+    clinical_configs = {
 
-    col1, col2, col3 = st.columns(3)
-
-    binary_configs = {
-        "HospitalGrade": {
-            "label": "Hospital level",
-            "options": {"Non-tertiary / lower-level hospital": 0, "Tertiary hospital": 1}
-        },
-        "Sex": {
-            "label": "Sex coding used in training",
-            "options": {"0": 0, "1": 1}
-        },
         "InpatientStatus": {
             "label": "Patient setting",
             "options": {"Outpatient": 0, "Inpatient": 1}
@@ -235,50 +224,31 @@ def build_patient_input_form(feature_order, scaler, feature_name_map):
             "label": "Chronic constipation",
             "options": {"No": 0, "Yes": 1}
         },
-        "ChronicDiarrhea": {
-            "label": "Chronic diarrhea",
-            "options": {"No": 0, "Yes": 1}
+        
+        "StoolForm": {
+            "label": "Usual stool form",
+            "options": {"Bristol 3–7": 0, "Bristol 1–2 / hard": 1}
         },
+
         "DiabetesMellitus": {
             "label": "Diabetes mellitus",
             "options": {"No": 0, "Yes": 1}
         },
-        "StoolForm": {
-            "label": "Usual stool form",
-            "options": {"Bristol 3–7": 0, "Bristol 1–2 / hard stool": 1}
-        },
-        "BPEducationModality": {
-            "label": "Bowel preparation education modality",
-            "options": {"Written + graphic/video education": 0, "Oral or written education": 1}
-        },
-        "SplitDose_BP": {
-            "label": "Split-dose bowel preparation",
-            "options": {"No": 0, "Yes": 1}
-        },
-        "PreColonoscopyPhysicalActivity": {
-            "label": "Physical activity before colonoscopy",
-            "options": {"No": 0, "Yes": 1}
-        },
-        "PsychotropicMedication_2": {
-            "label": "Psychotropic medication: TCA",
-            "options": {"No": 0, "Yes": 1}
-        },
+
         "PreviousAbdominopelvicSurgery_1": {
-            "label": "Previous abdominopelvic surgery variable",
-            "options": {"0": 0, "1": 1}
+            "label": "Previous abdominal surgery variable",
+            "options": {"No": 0, "Yes": 1}
         },
     }
 
-    columns_cycle = [col1, col2, col3]
-    i = 0
+    clinical_cols = st.columns(3)
+    shown_idx = 0
 
-    used_features = set(["Age", "BMI", "DietaryRestrictionDays"])
-
-    for feature, cfg in binary_configs.items():
+    for feature, cfg in clinical_configs.items():
         if feature not in feature_order:
             continue
 
-        with columns_cycle[i % 3]:
+        with clinical_cols[shown_idx % 3]:
             selected = st.selectbox(
                 cfg["label"],
                 options=list(cfg["options"].keys()),
@@ -291,11 +261,14 @@ def build_patient_input_form(feature_order, scaler, feature_name_map):
         raw_values[feature] = value
         summary_rows.append({"Variable": cfg["label"], "Value": selected})
         used_features.add(feature)
-        i += 1
-
+        shown_idx += 1
+    # ------------------------------------------------------------
+    # 3. 肠道准备相关因素
+    # ------------------------------------------------------------
     st.subheader("Bowel preparation details")
 
-    dcol, lcol, icol = st.columns(3)
+    bowel_cols1 = st.columns(3)
+    bowel_cols2 = st.columns(4)
 
     dietary_options = {
         "Fasting": "DietaryRestriction_1",
@@ -322,47 +295,79 @@ def build_patient_input_form(feature_order, scaler, feature_name_map):
 
     if dietary_group:
         valid_diet_options = {k: v for k, v in dietary_options.items() if v in dietary_group}
-        with dcol:
+        with bowel_cols1[0]:
             selected_diet = st.selectbox("Dietary restriction strategy", list(valid_diet_options.keys()))
         row = set_onehot(row, dietary_group, valid_diet_options[selected_diet])
         summary_rows.append({"Variable": "Dietary restriction strategy", "Value": selected_diet})
         used_features.update(dietary_group)
 
+    # 饮食限制天数
+    with bowel_cols1[1]:
+        diet_days = st.number_input("Dietary restriction days", min_value=0.0, max_value=7.0, value=1.0, step=1.0)
+
+    if "DietaryRestrictionDays" in row:
+        row["DietaryRestrictionDays"] = standardize_value(scaler, "DietaryRestrictionDays", diet_days)
+        raw_values["DietaryRestrictionDays"] = diet_days
+        summary_rows.append({"Variable": "Dietary restriction days", "Value": f"{diet_days} days"})
+        used_features.add("DietaryRestrictionDays")
+
+    # 泻药方案
     if laxative_group:
         valid_lax_options = {k: v for k, v in laxative_options.items() if v in laxative_group}
-        with lcol:
+        with bowel_cols1[2]:
             selected_lax = st.selectbox("Laxative regimen", list(valid_lax_options.keys()))
         row = set_onehot(row, laxative_group, valid_lax_options[selected_lax])
         summary_rows.append({"Variable": "Laxative regimen", "Value": selected_lax})
         used_features.update(laxative_group)
 
+    # 泻药是否分次服用
+    if "SplitDose_BP" in feature_order:
+        with bowel_cols2[0]:
+            split_options = {"No": 0, "Yes": 1}
+            selected_split = st.selectbox("Taking laxatives in divided doses", list(split_options.keys()))
+        row["SplitDose_BP"] = split_options[selected_split]
+        raw_values["SplitDose_BP"] = split_options[selected_split]
+        summary_rows.append({"Variable": "Taking laxatives in divided doses", "Value": selected_split})
+        used_features.add("SplitDose_BP")
+    # 肠道准备宣教方式
+    if "BPEducationModality" in feature_order:
+        with bowel_cols2[1]:
+            edu_options = {"Text + Illustrated or Video Instructions": 0, "Oral or Written Instructions": 1}
+            selected_edu = st.selectbox("Educational Methods for Bowel Preparation", list(edu_options.keys()))
+        row["BPEducationModality"] = edu_options[selected_edu]
+        raw_values["BPEducationModality"] = edu_options[selected_edu]
+        summary_rows.append({"Variable": "Educational Methods for Bowel Preparation", "Value": selected_edu})
+        used_features.add("BPEducationModality")
+
+    # 服用泻药后是否加强活动
+    if "PreColonoscopyPhysicalActivity" in feature_order:
+        with bowel_cols2[2]:
+            activity_options = {"No": 0, "Yes": 1}
+            selected_activity = st.selectbox("Physical Activity After Laxative Use", list(activity_options.keys()))
+        row["PreColonoscopyPhysicalActivity"] = activity_options[selected_activity]
+        raw_values["PreColonoscopyPhysicalActivity"] = activity_options[selected_activity]
+        summary_rows.append({"Variable": "Physical Activity After Laxative Use", "Value": selected_activity})
+        used_features.add("PreColonoscopyPhysicalActivity")
+
+    # 肠道准备至肠镜检查时间间隔
     if interval_group:
         valid_interval_options = {k: v for k, v in interval_options.items() if v in interval_group}
-        with icol:
-            selected_interval = st.selectbox("Interval from bowel preparation to colonoscopy", list(valid_interval_options.keys()))
+        with bowel_cols2[3]:
+            selected_interval = st.selectbox("Time Interval from Bowel Preparation to Colonoscopy", list(valid_interval_options.keys()))
         row = set_onehot(row, interval_group, valid_interval_options[selected_interval])
-        summary_rows.append({"Variable": "Interval to colonoscopy", "Value": selected_interval})
+        summary_rows.append({"Variable": "Time Interval from Bowel Preparation to Colonoscopy", "Value": selected_interval})
         used_features.update(interval_group)
 
-    remaining_binary = [
-        col for col in feature_order
-        if col not in used_features
-    ]
-
-    if remaining_binary:
-        with st.expander("Additional model variables", expanded=False):
-            for col in remaining_binary:
-                value = st.selectbox(
-                    feature_name_map.get(col, col),
-                    options=[0, 1],
-                    index=0,
-                    key=f"additional_{col}"
-                )
-                row[col] = value
-                summary_rows.append({"Variable": feature_name_map.get(col, col), "Value": value})
+    # ------------------------------------------------------------
+    # 未展示但模型需要的变量：默认 0
+    # ------------------------------------------------------------
+    for col in feature_order:
+        if col not in used_features:
+            row[col] = row.get(col, 0)
 
     patient_model_df = pd.DataFrame([row])[feature_order]
     patient_raw_df = pd.DataFrame([raw_values])
     input_summary_df = pd.DataFrame(summary_rows)
 
     return patient_raw_df, patient_model_df, input_summary_df
+

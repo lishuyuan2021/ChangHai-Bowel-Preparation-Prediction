@@ -58,54 +58,21 @@ st.warning(
 # Sidebar settings
 # ============================================================
 
-st.sidebar.header("Model Settings")
+DEPLOY_DIR = "Final_Deploy_Stacking_V2"
+INTERVENTION_THRESHOLD = 0.135
 
-DEPLOY_DIR = st.sidebar.text_input(
-    "Deployment folder",
-    value="Final_Deploy_Stacking_V2"
-)
+# 默认显示 SHAP 蜂巢图，抽样样本量固定为 100
+RUN_GLOBAL_SHAP = True
+GLOBAL_SHAP_N = 100
 
-INTERVENTION_THRESHOLD = st.sidebar.number_input(
-    "High-risk threshold",
-    min_value=0.000,
-    max_value=1.000,
-    value=0.135,
-    step=0.001,
-    format="%.3f"
-)
+# 默认进行两两组合干预扫描
+RUN_PAIRWISE_CF = True
 
-RUN_GLOBAL_SHAP = st.sidebar.checkbox(
-    "Show SHAP beeswarm plot",
-    value=True
-)
+# 默认排除“禁食 1 天及以上”作为反事实建议目标
+EXCLUDE_FASTING_OVER_1_DAY = True
 
-GLOBAL_SHAP_N = st.sidebar.slider(
-    "SHAP beeswarm sample size",
-    min_value=20,
-    max_value=200,
-    value=60,
-    step=10
-)
-
-RUN_PAIRWISE_CF = st.sidebar.checkbox(
-    "Evaluate pairwise counterfactual suggestions",
-    value=True
-)
-
-EXCLUDE_FASTING = st.sidebar.checkbox(
-    "Exclude fasting from suggestions",
-    value=False
-)
-
-MIN_ABSOLUTE_REDUCTION = st.sidebar.number_input(
-    "Minimum absolute risk reduction for suggestions",
-    min_value=0.000,
-    max_value=0.200,
-    value=0.000,
-    step=0.001,
-    format="%.3f"
-)
-
+# 只要预测风险下降即保留
+MIN_ABSOLUTE_REDUCTION = 0.000
 
 # ============================================================
 # Load model
@@ -135,8 +102,6 @@ X_val_final = datasets["X_val_final"][feature_order]
 
 feature_name_map = get_feature_display_map()
 
-st.sidebar.success("Model package loaded successfully.")
-
 
 # ============================================================
 # Input form
@@ -150,11 +115,6 @@ patient_raw_df, patient_model_df, input_summary_df = build_patient_input_form(
     feature_name_map=feature_name_map,
 )
 
-with st.expander("View encoded model input", expanded=False):
-    st.dataframe(patient_model_df.T.rename(columns={0: "Value"}), use_container_width=True)
-
-with st.expander("View clinical input summary", expanded=False):
-    st.dataframe(input_summary_df, use_container_width=True)
 
 
 # ============================================================
@@ -247,7 +207,7 @@ if "predicted_prob" in st.session_state:
         fig_waterfall = plot_patient_waterfall(
             patient_shap_values,
             predicted_prob=predicted_prob,
-            max_display=15
+            max_display=20
         )
 
         st.pyplot(fig_waterfall, clear_figure=True)
@@ -294,7 +254,7 @@ if "predicted_prob" in st.session_state:
             intervention_threshold=INTERVENTION_THRESHOLD,
             min_absolute_reduction=MIN_ABSOLUTE_REDUCTION,
             evaluate_pairwise=RUN_PAIRWISE_CF,
-            exclude_fasting=EXCLUDE_FASTING
+            exclude_fasting_over_1_day=EXCLUDE_FASTING_OVER_1_DAY
         )
 
     if cf_all_df.empty:
@@ -305,48 +265,44 @@ if "predicted_prob" in st.session_state:
     else:
         cf_all_display = add_display_columns(cf_all_df)
 
-        st.subheader("Top risk-decreasing suggestions")
+        st.subheader("Top 20 risk-decreasing suggestions")
 
-        display_cols = [
-            "Scenario_Type",
+
+        top_display_cols = [
+            "Intervention Type",
             "Intervention",
             "Original_Risk",
-            "Counterfactual_Risk",
-            "Absolute_Risk_Reduction_pp",
-            "Relative_Risk_Reduction_percent",
-            "Below_Intervention_Threshold",
-            "Interpretation"
+            "Counterfactual_Risk"
         ]
-
         st.dataframe(
-            cf_all_display[display_cols].head(20),
+            cf_all_display[top_display_cols].head(20),
             use_container_width=True
         )
 
-        csv_bytes = cf_all_display.to_csv(index=False, encoding="utf-8-sig").encode("utf-8-sig")
+        detail_display_cols = [
+            "Intervention Type",
+            "Counterfactual Recommendation",
+            "Baseline Measure",
+            "Post-Intervention Measure",
+            "Baseline Risk",
+            "Post-Intervention Risk"
+        ]
 
-        st.download_button(
-            label="Download counterfactual suggestions as CSV",
-            data=csv_bytes,
-            file_name="counterfactual_suggestions.csv",
-            mime="text/csv"
-        )
-
-        with st.expander("Single intervention suggestions", expanded=False):
+        with st.expander("Recommendations for Individual Interventions", expanded=True):
             if cf_single_df.empty:
-                st.info("No single intervention decreased the predicted risk.")
+                st.info("No individual interventions were found that could reduce the predicted risk.")
             else:
                 st.dataframe(
-                    add_display_columns(cf_single_df),
+                    add_display_columns(cf_single_df)[detail_display_cols],
                     use_container_width=True
                 )
 
-        with st.expander("Pairwise intervention suggestions", expanded=False):
+        with st.expander("Pairwise Intervention Suggestions", expanded=True):
             if cf_pairwise_df.empty:
-                st.info("No pairwise intervention decreased the predicted risk, or pairwise scanning was disabled.")
+                st.info("No pairwise interventions were found that could reduce the predicted risk, or pairwise scanning was disabled.")
             else:
                 st.dataframe(
-                    add_display_columns(cf_pairwise_df).head(50),
+                    add_display_columns(cf_pairwise_df)[detail_display_cols].head(50),
                     use_container_width=True
                 )
 

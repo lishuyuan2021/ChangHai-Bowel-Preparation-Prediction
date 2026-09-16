@@ -143,12 +143,25 @@ def classify_suggestion(prob, intervention_threshold):
     return "Risk decreased but remained above intervention threshold"
 
 
+
 def postprocess_row(row, feature_order):
-    """
-    Ensure values are aligned with model feature order.
-    """
     row = row.copy()
     return row[feature_order]
+
+
+def is_fasting_over_1_day(row, feature_order, scaler):
+    """Determine whether the current recommendation is “fast for 1 day or more.”"""
+    dietary_group = [c for c in [
+        "DietaryRestriction_1",
+        "DietaryRestriction_2",
+        "DietaryRestriction_3",
+        "DietaryRestriction_4"
+    ] if c in feature_order]
+
+    diet = decode_onehot_group(row, dietary_group, dietary_label_map)
+    days = get_diet_days(row, scaler)
+
+    return diet == "Fasting" and days is not None and days >= 1
 
 
 def generate_single_intervention_candidates(
@@ -156,7 +169,7 @@ def generate_single_intervention_candidates(
     feature_order,
     scaler,
     feature_name_map,
-    exclude_fasting=False
+    exclude_fasting_over_1_day=True
 ):
     actions = []
 
@@ -183,7 +196,7 @@ def generate_single_intervention_candidates(
         "BPtoColonoscopyinterval_4"
     ] if c in feature_order]
 
-    # Dietary restriction duration
+    # 饮食限制天数
     if "DietaryRestrictionDays" in feature_order:
         original_days = get_diet_days(original_row, scaler)
 
@@ -194,18 +207,18 @@ def generate_single_intervention_candidates(
             if abs(float(target_days) - float(original_days)) < 1e-6:
                 continue
 
-            direction = "Increase" if target_days > original_days else "Decrease"
+            direction = "increase" if target_days > original_days else "decrease"
 
             actions.append({
-                "Intervention_Category": "Dietary restriction duration",
-                "Intervention": f"{direction} dietary restriction duration to {target_days} days",
-                "Original_Value": f"{original_days} days",
-                "New_Value": f"{target_days} days",
-                "Changed_Features": "DietaryRestrictionDays",
+                "Intervention Type": "Dietary restriction duration",
+                "Counterfactual Recommendation": f"{direction}dietary restriction duration to {target_days} days",
+                "Baseline Measure": f"{original_days} days",
+                "Post-Intervention Measure": f"{target_days} days",
+                "Changed Features": "DietaryRestrictionDays",
                 "apply": lambda row, d=target_days: set_diet_days(row, scaler, d)
             })
 
-    # Binary modifiable variables
+    # 二元可干预变量
     for col in [
         "BPEducationModality",
         "SplitDose_BP",
@@ -224,37 +237,37 @@ def generate_single_intervention_candidates(
             new_label = get_binary_label(col, new_value)
 
             actions.append({
-                "Intervention_Category": feature_name_map.get(col, col),
-                "Intervention": f"{feature_name_map.get(col, col)}: {old_label} → {new_label}",
-                "Original_Value": old_label,
-                "New_Value": new_label,
-                "Changed_Features": col,
+                "Intervention Type": feature_name_map.get(col, col),
+                "Counterfactual Recommendation": f"{feature_name_map.get(col, col)}:{old_label} → {new_label}",
+                "Baseline Measure": old_label,
+                "Post-Intervention Measure": new_label,
+                "Changed Features": col,
                 "apply": lambda row, c=col, v=new_value: set_scalar_value(row, c, v)
             })
 
-    # Dietary strategy
+    # 饮食策略
     if dietary_group:
         old_diet = decode_onehot_group(original_row, dietary_group, dietary_label_map)
 
         for target_col in dietary_group:
             target_label = dietary_label_map.get(target_col, target_col)
 
-            if exclude_fasting and target_label == "Fasting":
+            if exclude_fasting_over_1_day and target_label == "Fasting" and get_diet_days(original_row, scaler) is not None and get_diet_days(original_row, scaler) >= 1:
                 continue
 
             if target_label == old_diet:
                 continue
 
             actions.append({
-                "Intervention_Category": "Dietary restriction strategy",
-                "Intervention": f"Dietary strategy: {old_diet} → {target_label}",
-                "Original_Value": old_diet,
-                "New_Value": target_label,
-                "Changed_Features": ",".join(dietary_group),
+                "Intervention Type": "Dietary restriction strategy",
+                "Counterfactual Recommendation": f"Dietary strategy: {old_diet} → {target_label}",
+                "Baseline Measure": old_diet,
+                "Post-Intervention Measure": target_label,
+                "Changed Features": ",".join(dietary_group),
                 "apply": lambda row, g=dietary_group, t=target_col: set_onehot_group(row, g, t)
             })
 
-    # Laxative regimen
+    # 泻药方案
     if laxative_group:
         old_laxative = decode_onehot_group(original_row, laxative_group, laxative_label_map)
 
@@ -275,15 +288,15 @@ def generate_single_intervention_candidates(
                 intervention_text = f"Laxative regimen: {old_laxative} → {target_label}"
 
             actions.append({
-                "Intervention_Category": category,
-                "Intervention": intervention_text,
-                "Original_Value": old_laxative,
-                "New_Value": target_label,
-                "Changed_Features": ",".join(laxative_group),
+                "Intervention Type": category,
+                "Counterfactual Recommendation": intervention_text,
+                "Baseline Measure": old_laxative,
+                "Post-Intervention Measure": target_label,
+                "Changed Features": ",".join(laxative_group),
                 "apply": lambda row, g=laxative_group, t=target_col: set_onehot_group(row, g, t)
             })
 
-    # Interval
+    # 肠道准备至肠镜检查时间间隔
     if interval_group:
         old_interval = decode_onehot_group(original_row, interval_group, interval_label_map)
 
@@ -294,11 +307,11 @@ def generate_single_intervention_candidates(
                 continue
 
             actions.append({
-                "Intervention_Category": "Interval between bowel preparation and colonoscopy",
-                "Intervention": f"Interval to colonoscopy: {old_interval} → {target_label}",
-                "Original_Value": old_interval,
-                "New_Value": target_label,
-                "Changed_Features": ",".join(interval_group),
+                "Intervention Type": "Interval between bowel preparation and colonoscopy",
+                "Counterfactual Recommendation": f"Interval to colonoscopy: {old_interval} → {target_label}",
+                "Baseline Measure": old_interval,
+                "Post-Intervention Measure": target_label,
+                "Changed Features": ",".join(interval_group),
                 "apply": lambda row, g=interval_group, t=target_col: set_onehot_group(row, g, t)
             })
 
@@ -314,7 +327,7 @@ def evaluate_single_interventions(
     feature_name_map,
     intervention_threshold,
     min_absolute_reduction=0.0,
-    exclude_fasting=False
+    exclude_fasting_over_1_day=True
 ):
     original_row = patient_model_df.iloc[0][feature_order].copy()
     original_prob = predict_single_risk(model, original_row, feature_order)
@@ -324,7 +337,7 @@ def evaluate_single_interventions(
         feature_order=feature_order,
         scaler=scaler,
         feature_name_map=feature_name_map,
-        exclude_fasting=exclude_fasting
+        exclude_fasting_over_1_day=exclude_fasting_over_1_day
     )
 
     rows = []
@@ -334,28 +347,30 @@ def evaluate_single_interventions(
         cf_row = action["apply"](original_row)
         cf_row = postprocess_row(cf_row, feature_order)
 
+        if exclude_fasting_over_1_day and "DietaryRestriction" in action["Changed Features"]:
+            if is_fasting_over_1_day(cf_row, feature_order, scaler):
+                continue
+
         cf_prob = predict_single_risk(model, cf_row, feature_order)
 
         abs_red = original_prob - cf_prob
-
         rel_red = abs_red / original_prob if original_prob > 0 else np.nan
-
         risk_decreasing = abs_red > min_absolute_reduction
 
         scenario_row = {
-            "Scenario_ID": i,
-            "Scenario_Type": "Single intervention",
-            "Intervention_Category": action["Intervention_Category"],
-            "Intervention": action["Intervention"],
-            "Changed_Features": action["Changed_Features"],
-            "Original_Value": action["Original_Value"],
-            "New_Value": action["New_Value"],
-            "Original_Probability": original_prob,
-            "Counterfactual_Probability": cf_prob,
-            "Absolute_Risk_Reduction": abs_red,
-            "Relative_Risk_Reduction": rel_red,
-            "Risk_Decreasing": risk_decreasing,
-            "Below_Intervention_Threshold": cf_prob < intervention_threshold,
+            "ID": i,
+            "Category": "Single intervention",
+            "Intervention Type": action["Intervention Type"],
+            "Counterfactual Recommendation": action["Counterfactual Recommendation"],
+            "Changed Features": action["Changed Features"],
+            "Baseline Measure": action["Baseline Measure"],
+            "Post-Intervention Measure": action["Post-Intervention Measure"],
+            "Original Predicted Probability": original_prob,
+            "Post-counterfactual Prediction Probability": cf_prob,
+            "Absolute Risk Reduction": abs_red,
+            "Relative Risk Reduction": rel_red,
+            "Risk Decreasing": risk_decreasing,
+            "Below Intervention Threshold": cf_prob < intervention_threshold,
             "Interpretation": classify_suggestion(cf_prob, intervention_threshold) if risk_decreasing else "Risk did not decrease"
         }
 
@@ -385,7 +400,7 @@ def evaluate_pairwise_interventions(
     feature_name_map,
     intervention_threshold,
     min_absolute_reduction=0.0,
-    exclude_fasting=False
+    exclude_fasting_over_1_day=True
 ):
     original_row = patient_model_df.iloc[0][feature_order].copy()
     original_prob = predict_single_risk(model, original_row, feature_order)
@@ -395,7 +410,7 @@ def evaluate_pairwise_interventions(
         feature_order=feature_order,
         scaler=scaler,
         feature_name_map=feature_name_map,
-        exclude_fasting=exclude_fasting
+        exclude_fasting_over_1_day=exclude_fasting_over_1_day
     )
 
     rows = []
@@ -409,28 +424,31 @@ def evaluate_pairwise_interventions(
 
         cf_row = postprocess_row(cf_row, feature_order)
 
+        changed_features = action_a["Changed Features"] + " + " + action_b["Changed Features"]
+        if exclude_fasting_over_1_day and "DietaryRestriction" in changed_features:
+            if is_fasting_over_1_day(cf_row, feature_order, scaler):
+                continue
+
         cf_prob = predict_single_risk(model, cf_row, feature_order)
 
         abs_red = original_prob - cf_prob
-
         rel_red = abs_red / original_prob if original_prob > 0 else np.nan
-
         risk_decreasing = abs_red > min_absolute_reduction
 
         scenario_row = {
-            "Scenario_ID": pair_id,
-            "Scenario_Type": "Pairwise combination",
-            "Intervention_Category": "Combined intervention",
-            "Intervention": action_a["Intervention"] + " + " + action_b["Intervention"],
-            "Changed_Features": action_a["Changed_Features"] + " + " + action_b["Changed_Features"],
-            "Original_Value": str(action_a["Original_Value"]) + " + " + str(action_b["Original_Value"]),
-            "New_Value": str(action_a["New_Value"]) + " + " + str(action_b["New_Value"]),
-            "Original_Probability": original_prob,
-            "Counterfactual_Probability": cf_prob,
-            "Absolute_Risk_Reduction": abs_red,
-            "Relative_Risk_Reduction": rel_red,
-            "Risk_Decreasing": risk_decreasing,
-            "Below_Intervention_Threshold": cf_prob < intervention_threshold,
+            "ID": pair_id,
+            "Category": "Pairwise intervention",
+            "Intervention Type": "Combined intervention",
+            "Counterfactual Recommendation": action_a["Counterfactual Recommendation"] + " + " + action_b["Counterfactual Recommendation"],
+            "Changed Features": action_a["Changed Features"] + " + " + action_b["Changed Features"],
+            "Baseline Measure": str(action_a["Baseline Measure"]) + " + " + str(action_b["Baseline Measure"]),
+            "Post-Intervention Measure": str(action_a["Post-Intervention Measure"]) + " + " + str(action_b["Post-Intervention Measure"]),
+            "Original Predicted Probability": original_prob,
+            "Post-counterfactual Prediction Probability": cf_prob,
+            "Absolute Risk Reduction": abs_red,
+            "Relative Risk Reduction": rel_red,
+            "Risk Decreasing": risk_decreasing,
+            "Below Intervention Threshold": cf_prob < intervention_threshold,
             "Interpretation": classify_suggestion(cf_prob, intervention_threshold) if risk_decreasing else "Risk did not decrease"
         }
 
@@ -461,7 +479,7 @@ def scan_risk_decreasing_measures(
     intervention_threshold=0.135,
     min_absolute_reduction=0.0,
     evaluate_pairwise=True,
-    exclude_fasting=False
+    exclude_fasting_over_1_day=True
 ):
     single_df, _ = evaluate_single_interventions(
         model=model,
@@ -472,7 +490,7 @@ def scan_risk_decreasing_measures(
         feature_name_map=feature_name_map,
         intervention_threshold=intervention_threshold,
         min_absolute_reduction=min_absolute_reduction,
-        exclude_fasting=exclude_fasting
+        exclude_fasting_over_1_day=exclude_fasting_over_1_day
     )
 
     if evaluate_pairwise:
@@ -485,7 +503,7 @@ def scan_risk_decreasing_measures(
             feature_name_map=feature_name_map,
             intervention_threshold=intervention_threshold,
             min_absolute_reduction=min_absolute_reduction,
-            exclude_fasting=exclude_fasting
+            exclude_fasting_over_1_day=exclude_fasting_over_1_day
         )
     else:
         pairwise_df = pd.DataFrame()
@@ -501,7 +519,7 @@ def scan_risk_decreasing_measures(
     if all_list:
         all_df = pd.concat(all_list, axis=0, ignore_index=True)
         all_df = all_df.sort_values(
-            by="Absolute_Risk_Reduction",
+            by="Absolute Risk Reduction",
             ascending=False
         ).reset_index(drop=True)
     else:
@@ -516,15 +534,15 @@ def add_display_columns(df):
 
     df = df.copy()
 
-    df["Original_Risk"] = df["Original_Probability"].apply(format_probability)
-    df["Counterfactual_Risk"] = df["Counterfactual_Probability"].apply(format_probability)
+    df["Original Risk"] = df["Original Predicted Probability"].apply(format_probability)
+    df["Post-Intervention Risk"] = df["Post-counterfactual Prediction Probability"].apply(format_probability)
 
-    df["Absolute_Risk_Reduction_pp"] = (
-        df["Absolute_Risk_Reduction"] * 100
+    df["Absolute Risk Reduction (%)"] = (
+        df["Absolute Risk Reduction"] * 100
     ).round(1)
 
-    df["Relative_Risk_Reduction_percent"] = (
-        df["Relative_Risk_Reduction"] * 100
+    df["Relative Risk Reduction (%)"] = (
+        df["Relative Risk Reduction"] * 100
     ).round(1)
 
     return df
