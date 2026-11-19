@@ -4,6 +4,7 @@
 # Final Model: Raw Stacking Classifier
 # ============================================================
 
+import hashlib
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -123,13 +124,33 @@ patient_raw_df, patient_model_df, input_summary_df = build_patient_input_form(
 
 st.header("2. Prediction Result")
 
-if st.button("Run Prediction", type="primary"):
+input_signature = hashlib.sha256(
+    (patient_model_df.to_json(orient="split", double_precision=15)
+     + patient_raw_df.to_json(orient="split", double_precision=15)).encode("utf-8")
+).hexdigest()
+inputs_changed = (
+    "predicted_prob" in st.session_state
+    and st.session_state.get("prediction_input_signature") != input_signature
+)
+if inputs_changed:
+    for result_key in ["predicted_prob", "risk_label", "patient_model_df", "patient_raw_df",
+                       "input_summary_df", "prediction_input_signature"]:
+        st.session_state.pop(result_key, None)
 
-    predicted_prob = predict_patient(
-        model=model,
-        patient_model_df=patient_model_df,
-        feature_order=feature_order
-    )
+inputs_ready = bool(np.isfinite(patient_model_df.to_numpy(dtype=float)).all())
+run_prediction = st.button("Run Prediction", type="primary", disabled=not inputs_ready)
+
+if run_prediction:
+
+    try:
+        predicted_prob = predict_patient(
+            model=model,
+            patient_model_df=patient_model_df,
+            feature_order=feature_order
+        )
+    except Exception as exc:
+        st.error(f"Prediction could not be completed: {exc}")
+        st.stop()
 
     risk_label = classify_binary_risk(
         predicted_prob,
@@ -141,6 +162,10 @@ if st.button("Run Prediction", type="primary"):
     st.session_state["patient_model_df"] = patient_model_df
     st.session_state["patient_raw_df"] = patient_raw_df
     st.session_state["input_summary_df"] = input_summary_df
+    st.session_state["prediction_input_signature"] = input_signature
+
+elif inputs_changed:
+    st.info("Patient inputs changed. Click 'Run Prediction' to calculate the updated result.")
 
 if "predicted_prob" in st.session_state:
 
@@ -172,7 +197,7 @@ if "predicted_prob" in st.session_state:
     if predicted_prob >= INTERVENTION_THRESHOLD:
         st.error("High risk: intensified bowel preparation may be considered.")
     else:
-        st.success("Low risk: standard bowel preparation may be considered.")
+        st.success("Low risk: standard bowel preparation may be considered. No counterfactual suggestions are needed.")
 
 
     # ========================================================
@@ -240,71 +265,72 @@ if "predicted_prob" in st.session_state:
     # Counterfactual / intervention suggestions
     # ========================================================
 
-    st.header("4. Counterfactual Intervention Suggestions")
+    if predicted_prob >= INTERVENTION_THRESHOLD:
+        st.header("4. Counterfactual Intervention Suggestions")
 
-    with st.spinner("Scanning risk-decreasing intervention scenarios..."):
+        with st.spinner("Scanning risk-decreasing intervention scenarios..."):
 
-        cf_single_df, cf_pairwise_df, cf_all_df = scan_risk_decreasing_measures(
-            model=model,
-            patient_model_df=patient_model_df,
-            patient_raw_df=patient_raw_df,
-            feature_order=feature_order,
-            scaler=scaler,
-            feature_name_map=feature_name_map,
-            intervention_threshold=INTERVENTION_THRESHOLD,
-            min_absolute_reduction=MIN_ABSOLUTE_REDUCTION,
-            evaluate_pairwise=RUN_PAIRWISE_CF,
-            exclude_fasting_over_1_day=EXCLUDE_FASTING_OVER_1_DAY
-        )
+            cf_single_df, cf_pairwise_df, cf_all_df = scan_risk_decreasing_measures(
+                model=model,
+                patient_model_df=patient_model_df,
+                patient_raw_df=patient_raw_df,
+                feature_order=feature_order,
+                scaler=scaler,
+                feature_name_map=feature_name_map,
+                intervention_threshold=INTERVENTION_THRESHOLD,
+                min_absolute_reduction=MIN_ABSOLUTE_REDUCTION,
+                evaluate_pairwise=RUN_PAIRWISE_CF,
+                exclude_fasting_over_1_day=EXCLUDE_FASTING_OVER_1_DAY
+            )
 
-    if cf_all_df.empty:
-        st.info(
-            "No model-based risk-decreasing intervention scenario was identified "
-            "under the predefined modifiable feature constraints."
-        )
-    else:
-        cf_all_display = add_display_columns(cf_all_df)
+        if cf_all_df.empty:
+            st.info(
+                "No model-based risk-decreasing intervention scenario was identified "
+                "under the predefined modifiable feature constraints."
+            )
+        else:
+            cf_all_display = add_display_columns(cf_all_df)
 
-        st.subheader("Top 20 risk-decreasing suggestions")
+            st.subheader("Top 20 risk-decreasing suggestions")
 
 
-        top_display_cols = [
-            "Intervention Type",
-            "Counterfactual Recommendation",
-            "Original Risk",
-            "Post-Intervention Risk"
-        ]
-        st.dataframe(
-            cf_all_display[top_display_cols].head(20),
-            use_container_width=True
-        )
+            top_display_cols = [
+                "Intervention Type",
+                "Counterfactual Recommendation",
+                "Original Risk",
+                "Post-Intervention Risk"
+            ]
+            st.dataframe(
+                cf_all_display[top_display_cols].head(20),
+                use_container_width=True
+            )
 
-        detail_display_cols = [
-            "Intervention Type",
-            "Counterfactual Recommendation",
-            "Baseline Measure",
-            "Post-Intervention Measure",
-            "Original Risk",
-            "Post-Intervention Risk"
-        ]
+            detail_display_cols = [
+                "Intervention Type",
+                "Counterfactual Recommendation",
+                "Baseline Measure",
+                "Post-Intervention Measure",
+                "Original Risk",
+                "Post-Intervention Risk"
+            ]
 
-        with st.expander("Recommendations for Individual Interventions", expanded=True):
-            if cf_single_df.empty:
-                st.info("No individual interventions were found that could reduce the predicted risk.")
-            else:
-                st.dataframe(
-                    add_display_columns(cf_single_df)[detail_display_cols],
-                    use_container_width=True
-                )
+            with st.expander("Recommendations for Individual Interventions", expanded=True):
+                if cf_single_df.empty:
+                    st.info("No individual interventions were found that could reduce the predicted risk.")
+                else:
+                    st.dataframe(
+                        add_display_columns(cf_single_df)[detail_display_cols],
+                        use_container_width=True
+                    )
 
-        with st.expander("Pairwise Intervention Suggestions", expanded=True):
-            if cf_pairwise_df.empty:
-                st.info("No pairwise interventions were found that could reduce the predicted risk, or pairwise scanning was disabled.")
-            else:
-                st.dataframe(
-                    add_display_columns(cf_pairwise_df)[detail_display_cols].head(50),
-                    use_container_width=True
-                )
+            with st.expander("Combined Intervention Suggestions", expanded=True):
+                if cf_pairwise_df.empty:
+                    st.info("No combined interventions were found that could reduce the predicted risk, or combined scanning was disabled.")
+                else:
+                    st.dataframe(
+                        add_display_columns(cf_pairwise_df)[detail_display_cols].head(50),
+                        use_container_width=True
+                    )
 
 else:
     st.info("Enter patient variables and click 'Run Prediction'.")

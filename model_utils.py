@@ -10,6 +10,10 @@ import pandas as pd
 import streamlit as st
 import matplotlib.pyplot as plt
 import matplotlib.font_manager as fm
+from clinical_rules import (
+    BMI_MIN, BMI_MAX, DIET_DAYS_MAX, NORMAL_DIET,
+    normalize_diet_days, resolve_bmi,
+)
 
 def setup_chinese_font():
     """
@@ -187,7 +191,16 @@ def classify_binary_risk(prob, threshold=0.135):
 
 def predict_patient(model, patient_model_df, feature_order):
     patient_model_df = patient_model_df[feature_order]
-    return float(model.predict_proba(patient_model_df)[:, 1][0])
+    if not np.isfinite(patient_model_df.to_numpy(dtype=float)).all():
+        raise ValueError("Complete all patient inputs before running prediction.")
+    probabilities = np.asarray(model.predict_proba(patient_model_df), dtype=float)
+    classes = np.asarray(getattr(model, "classes_", [0, 1]))
+    positive = np.flatnonzero(classes == 1)
+    if probabilities.shape != (len(patient_model_df), 2) or len(positive) != 1:
+        raise ValueError("Expected a binary model with class 1 indicating poor bowel preparation.")
+    if not np.isfinite(probabilities).all() or np.any((probabilities < 0) | (probabilities > 1)):
+        raise ValueError("The model returned invalid probabilities.")
+    return float(probabilities[0, positive[0]])
 
 
 # ============================================================
@@ -231,7 +244,7 @@ def build_patient_input_form(feature_order, scaler, feature_name_map):
 
     st.subheader("Basic information")
 
-    c1, c2, c3 = st.columns(3)
+    c1, c2 = st.columns(2)
 
     with c1:
         age = st.number_input("Age, years", min_value=18.0, max_value=100.0, value=60.0, step=1.0)
@@ -240,8 +253,41 @@ def build_patient_input_form(feature_order, scaler, feature_name_map):
         sex_options = {"Male": 1, "Female": 0}
         selected_sex = st.selectbox("Sex", list(sex_options.keys()))
 
-    with c3:
-        bmi = st.number_input("BMI(kg/m²)", min_value=10.0, max_value=50.0, value=23.0, step=0.1)
+    bmi_method = st.radio(
+        "BMI input method",
+        ["Enter BMI directly", "Calculate from height and weight"],
+        horizontal=True, key="input_bmi_method",
+        help="Choose one method. Height and weight are not required when entering BMI directly.",
+    )
+    use_height_weight = bmi_method == "Calculate from height and weight"
+    bmi_columns = st.columns(3)
+    with bmi_columns[0]:
+        height_cm = st.number_input(
+            "Height (cm)", min_value=1.0, value=None, step=0.1,
+            key="input_height_cm", disabled=not use_height_weight,
+        )
+    with bmi_columns[1]:
+        weight_kg = st.number_input(
+            "Weight (kg)", min_value=1.0, value=None, step=0.1,
+            key="input_weight_kg", disabled=not use_height_weight,
+        )
+    with bmi_columns[2]:
+        if use_height_weight:
+            try:
+                bmi = resolve_bmi(use_height_weight=True, height_cm=height_cm, weight_kg=weight_kg)
+            except ValueError as exc:
+                bmi = None
+                st.error(str(exc))
+            st.metric("BMI (kg/m²)", f"{bmi:.2f}" if bmi is not None else "—")
+            if height_cm is None or weight_kg is None:
+                st.caption("Enter both height and weight to calculate BMI.")
+        else:
+            direct_bmi = st.number_input(
+                "BMI (kg/m²)", min_value=BMI_MIN, max_value=BMI_MAX,
+                value=float(st.session_state.get("saved_direct_bmi", 23.0)), step=0.1, key="input_bmi_manual",
+            )
+            st.session_state["saved_direct_bmi"] = direct_bmi
+            bmi = resolve_bmi(use_height_weight=False, direct_bmi=direct_bmi)
 
     if "Age" in row:
         row["Age"] = standardize_value(scaler, "Age", age)
@@ -250,15 +296,23 @@ def build_patient_input_form(feature_order, scaler, feature_name_map):
         row["Sex"] = sex_options[selected_sex]
         used_features.add("Sex")
     if "BMI" in row:
-        row["BMI"] = standardize_value(scaler, "BMI", bmi)
+        row["BMI"] = standardize_value(scaler, "BMI", bmi) if bmi is not None else np.nan
         used_features.add("BMI")
 
-    raw_values.update({"Age": age, "Sex": sex_options[selected_sex], "BMI": bmi})
+    raw_values.update({"Age": age, "Sex": sex_options[selected_sex], "BMI": bmi,
+                       "BMIInputMethod": bmi_method,
+                       "HeightCm": height_cm if use_height_weight else None,
+                       "WeightKg": weight_kg if use_height_weight else None})
     summary_rows.extend([
         {"Variable": "Age", "Value": age},
         {"Variable": "BMI", "Value": bmi},
         {"Variable": "Sex", "Value": selected_sex},
     ])
+    if use_height_weight:
+        summary_rows.extend([
+            {"Variable": "Height (cm)", "Value": height_cm},
+            {"Variable": "Weight (kg)", "Value": weight_kg},
+        ])
 
     st.subheader("Clinical factors")
     clinical_configs = {
@@ -347,17 +401,36 @@ def build_patient_input_form(feature_order, scaler, feature_name_map):
     if dietary_group:
         valid_diet_options = {k: v for k, v in dietary_options.items() if v in dietary_group}
         with bowel_cols1[0]:
-            selected_diet = st.selectbox("Dietary restriction strategy", list(valid_diet_options.keys()))
+            selected_diet = st.selectbox("Dietary restriction strategy", list(valid_diet_options.keys()), key="input_dietary_strategy")
         row = set_onehot(row, dietary_group, valid_diet_options[selected_diet])
         summary_rows.append({"Variable": "Dietary restriction strategy", "Value": selected_diet})
         used_features.update(dietary_group)
 
     # 饮食限制天数
     with bowel_cols1[1]:
-        diet_days = st.number_input("Dietary restriction days", min_value=0.0, max_value=7.0, value=1.0, step=1.0)
+        normal_diet = dietary_group and valid_diet_options[selected_diet] == "DietaryRestriction_4"
+        if normal_diet:
+            st.number_input(
+                "Dietary restriction days", min_value=0.0, max_value=0.0,
+                value=0.0, step=0.5, key="input_diet_days_normal", disabled=True,
+            )
+            diet_days = 0.0
+        else:
+            diet_days = st.number_input(
+                "Dietary restriction days", min_value=0.0, max_value=DIET_DAYS_MAX,
+                value=float(st.session_state.get("saved_restricted_diet_days", 1.0)), step=0.5,
+                key="input_diet_days_restricted",
+            )
+            st.session_state["saved_restricted_diet_days"] = diet_days
+        diet_category = NORMAL_DIET if normal_diet else 1
+        try:
+            diet_days = normalize_diet_days(diet_category, diet_days)
+        except ValueError as exc:
+            st.error(str(exc))
+            diet_days = None
 
     if "DietaryRestrictionDays" in row:
-        row["DietaryRestrictionDays"] = standardize_value(scaler, "DietaryRestrictionDays", diet_days)
+        row["DietaryRestrictionDays"] = standardize_value(scaler, "DietaryRestrictionDays", diet_days) if diet_days is not None else np.nan
         raw_values["DietaryRestrictionDays"] = diet_days
         summary_rows.append({"Variable": "Dietary restriction days", "Value": f"{diet_days} days"})
         used_features.add("DietaryRestrictionDays")
